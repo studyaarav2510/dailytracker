@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>DayTrack – Habits & Tasks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1d2433;--mu:#6b7385;--ac:#4f6df5;--ok:#1fa971;--bad:#e5484d;--bd:#e3e6ee}
+@media (prefers-color-scheme:dark){:root{--bg:#12141b;--card:#1b1f2a;--tx:#e8ebf3;--mu:#9aa3b8;--ac:#7b92ff;--ok:#3ccf91;--bad:#ff6b70;--bd:#2c3242;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:760px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+h1{font-size:22px;margin:0}h2{font-size:17px;margin:0 0 10px}.mu{color:var(--mu);font-size:13px}
+input,select,button{font:inherit;color:inherit}input,select{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:9px 11px;width:100%;margin:4px 0}
+button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:9px 14px;cursor:pointer}button.g{background:transparent;color:var(--mu);border:1px solid var(--bd)}button.x{background:transparent;color:var(--bad);padding:4px 8px}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:0 0 auto}.row .f{flex:1}.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}.tabs button{background:var(--card);color:var(--tx);border:1px solid var(--bd)}.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.it{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--bd)}.it:first-of-type{border-top:0}.it input[type=checkbox]{width:22px;height:22px;margin:0}.done{text-decoration:line-through;color:var(--mu)}
+.due{color:var(--bad);font-size:12px}.err{color:var(--bad);font-size:13px;min-height:18px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--bd);margin-top:8px}.bars div{flex:1;border-radius:4px 4px 0 0;min-height:2px}
+.lab{display:flex;gap:3px;font-size:10px;color:var(--mu)}.lab span{flex:1;text-align:center;overflow:hidden}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:12px}.st{background:var(--bg);border-radius:10px;padding:10px}.st b{font-size:20px;display:block}
+.pb{height:8px;background:var(--bd);border-radius:5px;overflow:hidden}.pb i{display:block;height:100%;background:var(--ok)}
+img.sh{max-width:100%;max-height:260px;border-radius:10px;margin-top:8px}
+</style></head><body><div class="w" id="app"><div class="card mu">Loading…</div></div>
+<script type="module">
+/* ====== 1. PASTE YOUR FIREBASE CONFIG HERE (see SETUP.md) ====== */
+const firebaseConfig = {
+  apiKey: "AIzaSyCEs-Y3VJIodT4U4g43XEw-ae8-N73ojjA",
+  authDomain: "daily-tracker-2510.firebaseapp.com",
+  projectId: "daily-tracker-2510",
+  appId: "1:955160326860:web:ef9cbf89efbfeba79f0869"
+};
+/* =============================================================== */
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,getDoc,setDoc,deleteDoc,collection,getDocs,query,where} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const $=s=>document.querySelector(s),A=$("#app");
+if(firebaseConfig.apiKey==="PASTE_ME"){A.innerHTML='<div class="card"><h2>Setup needed</h2><div class="mu">Open index.html and paste your Firebase config at the top. See SETUP.md.</div></div>';throw 0}
+const fb=initializeApp(firebaseConfig),auth=getAuth(fb),db=getFirestore(fb);
+let me=null,target=null,kids=[],data=null,view="habits",per="week",mode="login",err="",tdate=null,busy=false;
+const iso=d=>{const o=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return o.toISOString().slice(0,10)};
+const today=()=>iso(new Date()),addD=(s,n)=>{const d=new Date(s+"T12:00:00");d.setDate(d.getDate()+n);return iso(d)};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9),fm=m=>Math.floor(m/60)+"h "+m%60+"m";
+const col=(u,n)=>collection(db,"users",u,n),dref=(u,n,id)=>doc(db,"users",u,n,id);
+const inDays=n=>new Date(Date.now()+n*864e5);
+const email=u=>u+"@daytrack.app",clean=s=>s.trim().toLowerCase().replace(/[^a-z0-9]/g,"");
+
+async function authGo(){err="";const u=clean($("#u").value),p=$("#p").value;
+ if(u.length<3||p.length<6){err="Username: 3+ letters/numbers. Password: 6+ characters.";return draw()}
+ busy=true;
+ try{
+  if(mode==="login"){await signInWithEmailAndPassword(auth,email(u),p)}
+  else{const role=$("#r").value,name=$("#n").value.trim()||u;let code=$("#fc")?$("#fc").value.trim().toUpperCase():"";
+   const cr=await createUserWithEmailAndPassword(auth,email(u),p),id=cr.user.uid;
+   try{let parentUid=null;
+    if(role==="parent"){code=uid().toUpperCase()+uid().toUpperCase().slice(0,3);parentUid=id;await setDoc(doc(db,"families",code),{parentUid:id});}
+    else{const f=await getDoc(doc(db,"families",code||"x"));if(!f.exists())throw new Error("Family code not found. Ask your parent for it.");parentUid=f.data().parentUid}
+    await setDoc(doc(db,"users",id),{name,username:u,role,familyCode:code,parentUid:role==="parent"?null:parentUid});
+   }catch(e){await cr.user.delete().catch(()=>{});throw e}}
+ }catch(e){busy=false;err=e.code==="auth/email-already-in-use"?"That username is taken.":/invalid-credential|wrong-password|user-not-found/.test(e.code||"")?"Wrong username or password.":(e.message||String(e));return draw()}
+ busy=false;await boot(auth.currentUser)}
+
+async function loadData(u){const y=addD(today(),-365);
+ const [h,l,t]=await Promise.all([getDocs(col(u,"habits")),getDocs(query(col(u,"logs"),where("date",">=",y))),getDocs(col(u,"tasks"))]);
+ const d={habits:[],logs:{},tasks:[]};h.forEach(x=>d.habits.push({id:x.id,...x.data()}));l.forEach(x=>d.logs[x.id]=x.data());t.forEach(x=>d.tasks.push({id:x.id,...x.data()}));return d}
+async function prune(u){const y=addD(today(),-365),w=addD(today(),-7);
+ try{for(const n of ["logs","shots"]){const s=await getDocs(query(col(u,n),where("date","<",y)));s.forEach(x=>deleteDoc(x.ref))}
+  data.tasks=data.tasks.filter(t=>{if(t.done&&t.doneOn<w){deleteDoc(dref(u,"tasks",t.id));return false}return true})}catch(e){}}
+async function boot(user){if(!user){me=null;return draw()}
+ try{const s=await getDoc(doc(db,"users",user.uid));if(!s.exists()){err="Account profile missing.";await signOut(auth);return}
+  me={uid:user.uid,...s.data()};
+  if(me.role==="child"){data=await loadData(me.uid);await prune(me.uid);view="habits"}
+  else{const q=await getDocs(query(collection(db,"users"),where("parentUid","==",me.uid)));kids=[];q.forEach(x=>kids.push({uid:x.id,...x.data()}));
+   target=kids[0]||null;data=target?await loadData(target.uid):{habits:[],logs:{},tasks:[]};view="analytics"}
+ }catch(e){err="Load error: "+(e.message||e)}
+ draw()}
+onAuthStateChanged(auth,u=>{if(busy)return;boot(u)});
+
+const save=async(p)=>{try{await p}catch(e){err="Could not save: "+(e.message||e);draw()}};
+const W={
+ mode:m=>{mode=m;err="";draw()},
+ logout:()=>signOut(auth),
+ setView:v=>{view=v;draw()},
+ setPer:p=>{per=p;draw()},
+ setDate:d=>{tdate=d;draw()},
+ pick:async u=>{target=kids.find(k=>k.uid===u);data=await loadData(u);draw()},
+ async addHabit(){const v=$("#hn").value.trim();if(!v)return;const id=uid();data.habits.push({id,name:v});await save(setDoc(dref(me.uid,"habits",id),{name:v}));draw()},
+ async delHabit(id){if(!confirm("Delete this habit? Past history for it will stop counting."))return;data.habits=data.habits.filter(h=>h.id!==id);await save(deleteDoc(dref(me.uid,"habits",id)));draw()},
+ async tick(id){const t=today(),l=data.logs[t]||(data.logs[t]={date:t,done:[],min:0}),i=l.done.indexOf(id);i<0?l.done.push(id):l.done.splice(i,1);
+  await save(setDoc(dref(me.uid,"logs",t),{...l,date:t,expireAt:inDays(366)}));draw()},
+ async saveScreen(){const t=today(),m=(+$("#sh").value||0)*60+(+$("#sm").value||0),l=data.logs[t]||(data.logs[t]={date:t,done:[],min:0});l.min=m;
+  await save(setDoc(dref(me.uid,"logs",t),{...l,date:t,expireAt:inDays(366)}));
+  const f=$("#sf").files[0];if(f){try{const img=await shrink(f);await setDoc(dref(me.uid,"shots",t),{date:t,img,expireAt:inDays(366)})}catch(e){err="Screenshot failed: "+(e.message||e)}}draw()},
+ async addTask(){const v=$("#tn").value.trim();if(!v)return;const t={id:uid(),title:v,due:$("#td").value||today(),done:false,doneOn:null};data.tasks.push(t);const{id,...r}=t;await save(setDoc(dref(me.uid,"tasks",id),r));draw()},
+ async togTask(id){const t=data.tasks.find(x=>x.id===id);t.done=!t.done;t.doneOn=t.done?today():null;const{id:_,...r}=t;await save(setDoc(dref(me.uid,"tasks",id),{...r,expireAt:t.done?inDays(7):null}));draw()},
+ async delTask(id){data.tasks=data.tasks.filter(x=>x.id!==id);await save(deleteDoc(dref(me.uid,"tasks",id)));draw()}
+};
+Object.assign(window,W,{authGo});
+function shrink(f){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>{const s=Math.min(1,640/i.width),c=document.createElement("canvas");c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.6))};i.onerror=()=>rej("bad image");i.src=URL.createObjectURL(f)})}
+async function showShot(d,pre){const u=target?target.uid:me.uid;try{const s=await getDoc(dref(u,"shots",d));if(s.exists()&&$("#shot"))$("#shot").innerHTML=pre+`<img class="sh" src="${s.data().img}">`}catch(e){}}
+
+const range=n=>{const o=[],t=today();for(let i=n-1;i>=0;i--)o.push(addD(t,-i));return o};
+function day(d){const tot=data.habits.length,l=data.logs[d]||{done:[],min:0},dn=l.done.filter(i=>data.habits.some(h=>h.id===i)).length;return{d,dn,tot,pct:tot?Math.round(dn/tot*100):0,min:l.min||0}}
+const bars=(rows,k,c,mx)=>`<div class="bars">${rows.map(r=>`<div title="${esc(r.l)}: ${r[k]}" style="height:${mx?Math.max(2,r[k]/mx*100):2}%;background:${c}"></div>`).join("")}</div><div class="lab">${rows.map(r=>`<span>${esc(r.l)}</span>`).join("")}</div>`;
+function analytics(){
+ if(!target&&me.role==="parent")return `<div class="card mu">No child linked yet. Ask your child to sign up using your family code.</div>`;
+ let out=`<div class="tabs">${["day","week","month","year"].map(p=>`<button class="${per===p?"on":""}" onclick="setPer('${p}')">${p[0].toUpperCase()+p.slice(1)}</button>`).join("")}</div>`;
+ if(per==="day"){tdate=tdate||today();const r=day(tdate),ld=(data.logs[tdate]||{done:[]}).done;
+  out+=`<div class="card"><input type="date" value="${tdate}" max="${today()}" onchange="setDate(this.value)"><div class="stats"><div class="st"><b>${r.dn}/${r.tot}</b>habits done</div><div class="st"><b>${r.pct}%</b>completion</div><div class="st"><b>${fm(r.min)}</b>mobile time</div></div>
+  ${data.habits.map(h=>`<div class="it"><span>${ld.includes(h.id)?"✅":"⬜"}</span><span>${esc(h.name)}</span></div>`).join("")||'<div class="mu">No habits yet.</div>'}<div id="shot"></div></div>`;
+  setTimeout(()=>showShot(tdate,'<div class="mu" style="margin-top:10px">Screen-time screenshot</div>'),0);return out}
+ let rows,days;
+ if(per==="year"){const t=new Date();rows=[];const all=range(366).map(day);
+  for(let i=11;i>=0;i--){const d=new Date(t.getFullYear(),t.getMonth()-i,1),p=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),ds=all.filter(x=>x.d.startsWith(p));
+   rows.push({l:d.toLocaleString("en",{month:"short"}),pct:ds.length?Math.round(ds.reduce((a,x)=>a+x.pct,0)/ds.length):0,min:ds.length?Math.round(ds.reduce((a,x)=>a+x.min,0)/ds.length):0})}
+  days=range(365).map(day)}
+ else{days=range(per==="week"?7:30).map(day);rows=days.map(x=>({l:per==="week"?new Date(x.d+"T12:00").toLocaleString("en",{weekday:"short"}):x.d.slice(8),pct:x.pct,min:x.min}))}
+ const avg=Math.round(days.reduce((a,x)=>a+x.pct,0)/days.length),sm=days.reduce((a,x)=>a+x.min,0),tot=days.reduce((a,x)=>a+x.dn,0),y=per==="year";
+ return out+`<div class="card"><div class="stats"><div class="st"><b>${avg}%</b>avg completion</div><div class="st"><b>${tot}</b>habit ticks</div><div class="st"><b>${fm(Math.round(sm/days.length))}</b>avg mobile/day</div><div class="st"><b>${fm(sm)}</b>total mobile</div></div>
+ <h2>Habit completion %${y?" (monthly avg)":""}</h2>${bars(rows,"pct","var(--ok)",100)}
+ <h2 style="margin-top:16px">Mobile time (min${y?", daily avg":""})</h2>${bars(rows,"min","var(--ac)",Math.max(1,...rows.map(r=>r.min)))}</div>
+ <div class="card"><h2>Per habit</h2>${data.habits.map(h=>{const n=days.filter(x=>(data.logs[x.d]||{done:[]}).done.includes(h.id)).length,p=Math.round(n/days.length*100);return `<div style="margin:8px 0"><div class="row"><span class="f">${esc(h.name)}</span><span class="mu">${n}/${days.length} days · ${p}%</span></div><div class="pb"><i style="width:${p}%"></i></div></div>`}).join("")||'<div class="mu">No habits yet.</div>'}</div>`}
+function habitsV(){const t=today(),l=data.logs[t]||{done:[],min:0};
+ setTimeout(()=>showShot(t,""),0);
+ return `<div class="card"><h2>Today’s habits</h2>${data.habits.map(h=>`<div class="it"><input type="checkbox" ${l.done.includes(h.id)?"checked":""} onchange="tick('${h.id}')"><span class="f ${l.done.includes(h.id)?"done":""}">${esc(h.name)}</span><button class="x" onclick="delHabit('${h.id}')">Delete</button></div>`).join("")||'<div class="mu">No habits yet. Add your first one below.</div>'}
+ <div class="row" style="margin-top:10px"><input class="f" id="hn" placeholder="New habit (e.g. Read 20 minutes)"><button onclick="addHabit()">Add</button></div><div class="mu">Habits stay until you delete them.</div></div>
+ <div class="card"><h2>Mobile screen time today</h2><div class="row"><input id="sh" type="number" min="0" max="24" placeholder="hours" value="${Math.floor(l.min/60)}"><input id="sm" type="number" min="0" max="59" placeholder="min" value="${l.min%60}"></div>
+ <label class="mu">Attach screenshot of your screen-time page</label><input id="sf" type="file" accept="image/*"><button onclick="saveScreen()" style="margin-top:6px">Save today’s screen time</button><div id="shot"></div></div>`}
+function tasksV(){const t=today(),od=data.tasks.filter(x=>!x.done&&x.due<t),up=data.tasks.filter(x=>!x.done&&x.due>=t),dn=data.tasks.filter(x=>x.done);
+ const li=(x,o)=>`<div class="it"><input type="checkbox" ${x.done?"checked":""} onchange="togTask('${x.id}')"><span class="f ${x.done?"done":""}">${esc(x.title)}<br><span class="${o?"due":"mu"}">${o?"Overdue · ":"Due "}${x.due}</span></span><button class="x" onclick="delTask('${x.id}')">✕</button></div>`;
+ return `<div class="card"><div class="row"><input class="f" id="tn" placeholder="New task"><input id="td" type="date" value="${t}" style="width:150px"><button onclick="addTask()">Add</button></div></div>
+ <div class="card"><h2 style="color:var(--bad)">Overdue (${od.length})</h2>${od.map(x=>li(x,1)).join("")||'<div class="mu">Nothing overdue 🎉</div>'}</div>
+ <div class="card"><h2>Upcoming (${up.length})</h2>${up.map(x=>li(x)).join("")||'<div class="mu">No pending tasks.</div>'}</div>
+ <div class="card"><h2>Completed (${dn.length})</h2>${dn.map(x=>li(x)).join("")||'<div class="mu">Nothing completed yet.</div>'}<div class="mu">Completed tasks are removed after 7 days.</div></div>`}
+function draw(){
+ if(!me){A.innerHTML=`<div class="card"><h1>DayTrack</h1><div class="mu">Daily habits & tasks for kids, with analytics for parents.</div></div>
+ <div class="card"><div class="tabs"><button class="${mode==="login"?"on":""}" onclick="mode_('login')">Log in</button><button class="${mode==="signup"?"on":""}" onclick="mode_('signup')">Sign up</button></div>
+ ${mode==="signup"?`<input id="n" placeholder="Your name"><select id="r" onchange="document.querySelector('#fcw').style.display=this.value==='child'?'block':'none'"><option value="child">I’m a child</option><option value="parent">I’m a parent</option></select><div id="fcw"><input id="fc" placeholder="Family code (from your parent)"></div>`:""}
+ <input id="u" placeholder="Username" autocapitalize="none"><input id="p" type="password" placeholder="Password (6+ characters)"><div class="err">${esc(err)}</div><button onclick="authGo()">${mode==="login"?"Log in":"Create account"}</button>
+ ${mode==="signup"?`<div class="mu" style="margin-top:8px">Parents sign up first and get a family code. Children use that code to join.</div>`:""}</div>`;return}
+ const par=me.role==="parent";
+ let h=`<div class="card row"><div class="f"><h1>Hi, ${esc(me.name)}</h1><div class="mu">${par?"Parent · family code: <b>"+esc(me.familyCode)+"</b>":"Child"}</div></div><button class="g" onclick="logout()">Log out</button></div>`;
+ if(par)h+=`<div class="card"><label class="mu">Viewing child</label><select onchange="pick(this.value)">${kids.map(k=>`<option value="${k.uid}" ${target&&target.uid===k.uid?"selected":""}>${esc(k.name)}</option>`).join("")||"<option>No children yet</option>"}</select></div>`+analytics();
+ else h+=`<div class="tabs">${["habits","tasks","analytics"].map(v=>`<button class="${view===v?"on":""}" onclick="setView('${v}')">${v[0].toUpperCase()+v.slice(1)}</button>`).join("")}</div>`+(view==="habits"?habitsV():view==="tasks"?tasksV():analytics());
+ if(err)h+=`<div class="err">${esc(err)}</div>`;A.innerHTML=h}
+window.mode_=m=>{mode=m;err="";draw()};
+</script></body></html>
